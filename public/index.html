@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Check the Lock</title>
+
+  <link rel="manifest" href="/manifest.json">
+
+  <!-- update the version number as needed -->
+  <script defer src="/__/firebase/8.4.2/firebase-app.js"></script>
+  <!-- include only the Firebase features as you need -->
+  <script defer src="/__/firebase/8.4.2/firebase-firestore.js"></script>
+  <script defer src="/__/firebase/8.4.2/firebase-messaging.js"></script>
+  <!-- Initialize Firebase -->
+  <script defer src="/__/firebase/init.js"></script>
+
+  <style media="screen">
+    body {
+      background: #ECEFF1;
+      color: rgba(0, 0, 0, 0.87);
+      font-family: Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+
+    body.open {
+      background: #d84655;
+    }
+
+    body.close {
+      background: #119227;
+    }
+
+    #message {
+      max-width: 360px;
+      margin: 200px auto 16px;
+      padding: 32px 24px;
+    }
+
+    #message h1 {
+      font-size: 128px;
+      font-weight: 300;
+      color: white;
+      margin: 0 0 16px;
+      text-align: center;
+    }
+
+    #load {
+      color: rgba(0, 0, 0, 0.4);
+      text-align: center;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="message">
+    <h1 id="status"></h1>
+  </div>
+  <p id="load">Firebase SDK Loading&hellip;</p>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async function () {
+      const loadEl = document.querySelector('#load');
+      try {
+        let app = firebase.app();
+        let features = [
+          'firestore',
+          'messaging',
+        ].filter(feature => typeof app[feature] === 'function');
+        loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
+
+        // 初回はFirestoreの最新データを使ってステータスを表示
+        const db = firebase.firestore();
+        const snapshot = await db.collection('logs').orderBy('timestamp', 'desc').limit(1).get();
+        if (!snapshot.empty) {
+          const doc = snapshot.docs[0];
+          const data = doc.data();
+          console.log(data);
+          showStatus(data.distance);
+        };
+
+        // フォアグラウンドでpushメッセージを受け取ったときの処理
+        const messaging = firebase.messaging();
+        messaging.onMessage((payload) => {
+          console.log('Message received. ', payload);
+          if (payload.data) {
+            // 計測した距離を受信したらステータスに反映
+            const distance = parseInt(payload.data.distance);
+            showStatus(distance);
+          }
+          if (payload.notification) {
+            // フォアグラウンドで通知を受け取ったら、通知を表示
+            alert(`${payload.notification.title}\n${payload.notification.body}`);
+          }
+        });
+
+        // 通知の購読を開始
+        initMessaging(messaging);
+      } catch (e) {
+        console.error(e);
+        loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
+      }
+    });
+
+    function showStatus(distance) {
+      const statusEl = document.getElementById('status');
+      const status = distance > 120 || distance === 20 ? '開' : '閉';
+      statusEl.innerText = status;
+      if (status === '開') {
+        document.body.classList.add('open');
+        document.body.classList.remove('close');
+      } else {
+        document.body.classList.add('close');
+        document.body.classList.remove('open');
+      }
+    }
+
+    function initMessaging(messaging) {
+      registSW();
+
+      // デバイス登録トークンを取得し、Firestoreの保存
+      // vapidKeyは、Firebaseプロジェクトの[プロジェクトの概要]からWebアプリを開き、[Cloud Messaging]タブの[ウェブプッシュ証明書] > [鍵ペア]の値に置き換えます。
+      messaging.getToken({ vapidKey: '鍵ペアの値をコピー&ペースト' }).then((currentToken) => {
+        console.log(currentToken);
+        if (currentToken) {
+          storeToken(currentToken);
+
+        } else {
+          // Show permission request.
+          alert('No registration token available. Request permission to generate one.');
+        }
+      }).catch((err) => {
+        alert('An error occurred while retrieving token. ' + err);
+      });
+    }
+
+    async function storeToken(currentToken) {
+      const db = firebase.firestore();
+      const docRef = await db.collection("tokens").add({
+        token: currentToken,
+        timestamp: new Date()
+      });
+      console.log("Document written with ID: ", docRef.id);
+    }
+
+    function registSW() {
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/firebase-messaging-sw.js')
+            .then(function (registration) {
+              console.log('firebase-messaging-sw.js registration successful with scope: ', registration.scope);
+            }, function (err) {
+              alert('firebase-messaging-sw.js registration failed: ' + err);
+            });
+        });
+      }
+    }
+  </script>
+</body>
+
+</html>
